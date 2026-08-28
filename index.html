@@ -90,6 +90,7 @@
   </label>
   <label class="ctl">平均点距
     <select id="step">
+      <option value="1">1px（逐像素）</option>
       <option value="2">2px（最密）</option>
       <option value="3" selected>3px</option>
       <option value="4">4px</option>
@@ -450,7 +451,9 @@
     statusEl.textContent = '「' + imgName + '」 ' + W + '×' + H + '（原尺寸） · ' + n +
       ' 点 · ' + modeName(mode) + ' · 生成 ' + Math.round(tGen) + ' ms · 取色/缓冲 ' +
       Math.round(tColor) + ' ms · 绘制 ' + Math.round(tDraw) + ' ms（' +
-      (gl ? 'WebGL GPU' : 'Canvas2D 回退') + '）· SVG 点击下载时生成';
+      (gl ? 'WebGL GPU' : 'Canvas2D 回退') + '）' +
+      (n >= 2000000 ? '· 点量很大，大图建议 2px 以上' : '') +
+      ' · SVG 点击下载时生成';
   }
 
   function render() {
