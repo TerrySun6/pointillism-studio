@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>点彩画派 · 通用图片点彩工具</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: radial-gradient(1100px 700px at 50% 18%, #221a14 0%, #0b0908 62%);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 28px 14px 48px;
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    color: #ece2d4;
+  }
+  h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: .14em; }
+  .sub { margin: 8px 0 20px; font-size: 13px; color: #b5a693; letter-spacing: .05em; }
+  .stage {
+    position: relative; width: min(92vw, 820px);
+    border-radius: 10px; background: #0b0908;
+    box-shadow: 0 30px 90px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.09);
+    display: flex; align-items: center; justify-content: center;
+    padding: 10px 0; min-height: 200px;
+  }
+  canvas {
+    display: none;
+    max-width: calc(100% - 4px); max-height: 640px;
+    width: auto; height: auto;          /* 保持宽高比，适合容器显示 */
+    border-radius: 4px;
+  }
+  .drop-hint {
+    padding: 56px 24px; text-align: center; color: #9c8f7a;
+    font-size: 14px; line-height: 2; letter-spacing: .08em; cursor: pointer;
+  }
+  .drop-hint b { color: #cdbfa9; font-weight: 600; }
+  .drop-hint .big { font-size: 40px; display: block; margin-bottom: 8px; }
+  .controls {
+    margin-top: 22px; display: flex; flex-wrap: wrap; gap: 14px;
+    align-items: center; justify-content: center; max-width: 900px;
+  }
+  .controls button, .file-btn {
+    background: linear-gradient(#4a3524, #33231a);
+    color: #f2e7d5; border: 1px solid #7a5734; padding: 10px 20px; border-radius: 9px;
+    font-size: 14px; letter-spacing: .12em; cursor: pointer; display: inline-block;
+    transition: transform .12s, filter .12s;
+  }
+  .controls button:hover, .file-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+  input[type=file] { display: none; }
+  .ctl { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #cdbfa9; }
+  select { accent-color: #c7762e; }
+  select, input[type=color] {
+    background: #2b2018; color: #f2e7d5; border: 1px solid #7a5734;
+    border-radius: 7px; padding: 6px 8px; font-size: 13px;
+  }
+  input[type=color] { width: 44px; padding: 2px; cursor: pointer; }
+  input[type=range] { width: 120px; accent-color: #c7762e; }
+  input[type=checkbox] { accent-color: #c7762e; }
+  #status { margin-top: 14px; font-size: 12px; color: #cdbfa9; letter-spacing: .06em; min-height: 1.2em; }
+  .note { margin-top: 4px; font-size: 12px; color: #8d806c; letter-spacing: .06em; text-align: center; }
+</style>
+</head>
+<body>
+<h1>点 彩 画 派 · 通 用 图 片 点 彩 工 具</h1>
+<p class="sub">自然散布函数落点 · 逐点取色 —— 任何图片，都可以用色点重新画一遍</p>
+
+<div class="stage" id="stage">
+  <canvas id="art"></canvas>
+  <div class="drop-hint" id="drop">
+    <span class="big">&#128444;&#65039;</span>
+    <b>点击选择图片</b> · 或把图片<b>拖拽到此处</b> · 或 <b>Ctrl+V 粘贴</b><br />
+    支持 JPG / PNG / WebP / GIF / AVIF / BMP / SVG<br />
+    （HEIC / TIFF 等浏览器不认的格式需先转换，失败时会提示方法）
+  </div>
+</div>
+
+<div class="controls">
+  <label class="file-btn" for="file">&#128194; 选择图片</label>
+  <input type="file" id="file" accept="image/*" />
+  <button id="btn-sample" title="加载内置示例图">&#127916; 示例图</button>
+  <label class="ctl">散布方式
+    <select id="mode">
+      <option value="poisson" selected>泊松盘 · 蓝噪声</option>
+      <option value="r2">R2 低差异序列</option>
+      <option value="gold">黄金比例错行</option>
+      <option value="noise">噪波密度（手工感）</option>
+      <option value="grid">逐格随机</option>
+      <option value="free">完全随机散点</option>
+    </select>
+  </label>
+  <label class="ctl">平均点距
+    <select id="step">
+      <option value="2">2px（最密）</option>
+      <option value="3" selected>3px</option>
+      <option value="4">4px</option>
+      <option value="5">5px</option>
+      <option value="6">6px</option>
+      <option value="8">8px（疏）</option>
+    </select>
+  </label>
+  <label class="ctl">点径 <input id="size" type="range" min="0.5" max="2.0" step="0.05" value="1.0" /></label>
+  <label class="ctl"><input id="jitter" type="checkbox" checked /> 点径自然抖动</label>
+  <label class="ctl">画布底色 <input type="color" id="paper" value="#f2eee4" /></label>
+  <button id="btn-regen">&#127922; 重新撒点</button>
+  <button id="btn-save-svg">&#11015; 下载 SVG</button>
+  <button id="btn-save-png">&#11015; 下载 PNG</button>
+</div>
+
+<p id="status">请先选择一张图片，或点击「示例图」试试。</p>
+<p class="note">按上传图片原尺寸处理 · 下载 SVG（矢量，每个色点一个 circle 元素）或 PNG（位图，按像素原样导出）· 每个色点：自然随机位置 + 该位置的源图像真实色彩</p>
+
+<script src="image-data.js"></script>
+<script>
+(function () {
+  'use strict';
+  var TAU = Math.PI * 2;
+
+  var canvas = document.getElementById('art');
+  var ctx = null;                        // Canvas2D 上下文（WebGL 不可用时回退）
+  var stage = document.getElementById('stage');
+  var drop = document.getElementById('drop');
+  var statusEl = document.getElementById('status');
+  var modeSel = document.getElementById('mode');
+  var stepSel = document.getElementById('step');
+  var sizeRange = document.getElementById('size');
+  var jitSel = document.getElementById('jitter');
+  var paperSel = document.getElementById('paper');
+
+  var seed = (Math.random() * 1e9) | 0;
+  var img = new Image();                 // 当前源图像
+  var imgName = 'image';
+  var hasImage = false;
+  var svgState = null;                   // SVG 懒生成所需的点数据快照 {pos,rads,cols,W,H,paper}
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /* =================== GPU（WebGL）渲染器 =================== */
+  /* 思路：先 CPU 生成点阵，再把所有色点作为顶点属性一次性传给 GPU，
+     用 gl.POINTS 单次 drawArrays 画完 —— 百万点也只有 1 次绘制调用 */
+  var gl = null, glURes = null, glMaxPointSize = 64;
+  var glBufPos = null, glBufSize = null, glBufCol = null;
+  var glAttrPos = 0, glAttrSize = 0, glAttrCol = 0;
+
+  function initGL(glCanvas) {
+    var g = null;
+    try {
+      g = glCanvas.getContext('webgl', {
+        preserveDrawingBuffer: true, alpha: false, antialias: false,
+        depth: false, stencil: false
+      }) || glCanvas.getContext('experimental-webgl', {
+        preserveDrawingBuffer: true, alpha: false
+      });
+    } catch (e) { g = null; }
+    if (!g) return false;
+
+    var vs = g.createShader(g.VERTEX_SHADER);
+    g.shaderSource(vs, [
+      'attribute vec2 aPos;',
+      'attribute float aSize;',
+      'attribute vec4 aColor;',
+      'uniform vec2 uRes;',
+      'varying vec4 vC;',
+      'void main(){',
+      '  gl_Position = vec4(aPos.x / uRes.x * 2.0 - 1.0, 1.0 - aPos.y / uRes.y * 2.0, 0.0, 1.0);',
+      '  gl_PointSize = aSize;',
+      '  vC = aColor;',
+      '}'
+    ].join('\n'));
+    g.compileShader(vs);
+    var fs = g.createShader(g.FRAGMENT_SHADER);
+    g.shaderSource(fs, [
+      'precision mediump float;',
+      'varying vec4 vC;',
+      'void main(){',
+      '  float d = length(gl_PointCoord - vec2(0.5));',   // 圆形软边点
+      '  float a = smoothstep(0.5, 0.46, d) * vC.a;',
+      '  if (a <= 0.002) discard;',
+      '  gl_FragColor = vec4(vC.rgb, a);',
+      '}'
+    ].join('\n'));
+    g.compileShader(fs);
+    var prog = g.createProgram();
+    g.attachShader(prog, vs);
+    g.attachShader(prog, fs);
+    g.linkProgram(prog);
+    if (!g.getShaderParameter(vs, g.COMPILE_STATUS) ||
+        !g.getShaderParameter(fs, g.COMPILE_STATUS) ||
+        !g.getProgramParameter(prog, g.LINK_STATUS)) {
+      return false;
+    }
+    g.useProgram(prog);
+    glURes = g.getUniformLocation(prog, 'uRes');
+    glAttrPos = g.getAttribLocation(prog, 'aPos');
+    glAttrSize = g.getAttribLocation(prog, 'aSize');
+    glAttrCol = g.getAttribLocation(prog, 'aColor');
+    glBufPos = g.createBuffer();
+    glBufSize = g.createBuffer();
+    glBufCol = g.createBuffer();
+    var range = g.getParameter(g.ALIASED_POINT_SIZE_RANGE);
+    glMaxPointSize = (range && range[1]) ? range[1] : 64;
+    g.enable(g.BLEND);
+    g.blendFunc(g.SRC_ALPHA, g.ONE_MINUS_SRC_ALPHA);
+    gl = g;
+    return true;
+  }
+
+  if (initGL(canvas)) {
+    /* WebGL GPU 主路径就绪 */
+  } else {
+    ctx = canvas.getContext('2d');       // WebGL 不可用 → Canvas2D 回退
+    if (!ctx) {                          // 罕见：上下文被锁定，换一张全新 canvas
+      var c2 = canvas.cloneNode(false);
+      canvas.parentNode.replaceChild(c2, canvas);
+      canvas = c2;
+      ctx = canvas.getContext('2d');
+    }
+  }
+
+  /* =================== 核心：自然散布函数（纯函数，可单测） =================== */
+  /* __CORE_START__ */
+  function makeNoise(rng, N) {           // 值噪声（平滑随机场，用于密度的自然起伏）
+    N = N || 16;
+    var grid = new Float32Array(N * N);
+    for (var i = 0; i < N * N; i++) grid[i] = rng();
+    return function (x, y) {
+      var gx = x * N, gy = y * N;
+      var ix = gx | 0, iy = gy | 0;
+      var fx = gx - ix, fy = gy - iy;
+      fx = fx * fx * (3 - 2 * fx);
+      fy = fy * fy * (3 - 2 * fy);
+      var x0 = ix % N, y0 = iy % N, x1 = (ix + 1) % N, y1 = (iy + 1) % N;
+      var a = grid[y0 * N + x0], b = grid[y0 * N + x1];
+      var c = grid[y1 * N + x0], d = grid[y1 * N + x1];
+      var ab = a + (b - a) * fx, cd = c + (d - c) * fx;
+      return ab + (cd - ab) * fy;
+    };
+  }
+
+  /* 取色坐标钳制：x 用 W 钳制、y 用 H 钳制（横竖图都必须正确） */
+  function sampleCoord(x, y, W, H) {
+    return [
+      Math.min(W - 1, Math.max(0, x | 0)),
+      Math.min(H - 1, Math.max(0, y | 0))
+    ];
+  }
+
+  function genPoints(mode, W, H, s, rng) {
+    var pts = [], i, j, t;
+    if (mode === 'poisson') {
+      /* Bridson 泊松盘（蓝噪声）：点与点天然保持最小间距，无网格、无堆积、无空洞 */
+      var r = s * 0.82, cell = r / Math.SQRT2;
+      var gw = Math.ceil(W / cell), gh = Math.ceil(H / cell);
+      var grid = new Int32Array(gw * gh);
+      for (i = 0; i < grid.length; i++) grid[i] = -1;
+      var px = rng() * W, py = rng() * H;
+      pts.push([px, py]);
+      var active = [0];
+      grid[Math.min(gh - 1, py / cell | 0) * gw + Math.min(gw - 1, px / cell | 0)] = 0;
+      while (active.length) {
+        var ai = rng() * active.length | 0;
+        var pi = active[ai];
+        var bx = pts[pi][0], by = pts[pi][1];
+        var ok = false;
+        for (t = 0; t < 24; t++) {
+          var ang = rng() * TAU;
+          var rad = r * (1 + rng());
+          var nx = bx + Math.cos(ang) * rad, ny = by + Math.sin(ang) * rad;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          var gx2 = nx / cell | 0, gy2 = ny / cell | 0;
+          var fits = true;
+          for (var dy = -2; dy <= 2 && fits; dy++) {
+            var gy3 = gy2 + dy;
+            if (gy3 < 0 || gy3 >= gh) continue;
+            var row = gy3 * gw;
+            for (var dx = -2; dx <= 2; dx++) {
+              var gx3 = gx2 + dx;
+              if (gx3 < 0 || gx3 >= gw) continue;
+              var idx = grid[row + gx3];
+              if (idx < 0) continue;
+              var ddx = pts[idx][0] - nx, ddy = pts[idx][1] - ny;
+              if (ddx * ddx + ddy * ddy < r * r) { fits = false; break; }
+            }
+          }
+          if (fits) {
+            grid[gy2 * gw + gx2] = pts.length;
+            pts.push([nx, ny]);
+            active.push(pts.length - 1);
+            ok = true;
+            break;
+          }
+        }
+        if (!ok) {
+          active[ai] = active[active.length - 1];
+          active.pop();
+        }
+      }
+      return pts;
+    }
+    if (mode === 'r2') {
+      /* R2 低差异序列：铺满时处处均匀，又没有可察觉的网格/条纹/聚堆 */
+      var c1 = 0.7548776662466927, c2 = 0.5698402909980532;
+      var count = Math.floor(W * H / (s * s));
+      for (i = 0; i < count; i++) {
+        pts.push([((i * c1 + 0.5) % 1) * W, ((i * c2 + 0.5) % 1) * H]);
+      }
+      return pts;
+    }
+    if (mode === 'gold') {
+      /* 黄金比例错行：每行错开黄金比例相位，行内再加随机游走，天然而均匀 */
+      var rows = Math.ceil(H / s);
+      for (j = 0; j < rows; j++) {
+        var yy = Math.max(0, Math.min(H - 0.01, (j + 0.5) * s + (rng() - 0.5) * s * 0.5));
+        var off = (j * 0.6180339887498949 % 1) * s;
+        for (var xx = off - s; xx < W; xx += s) {
+          pts.push([Math.max(0, Math.min(W - 0.01, xx + s / 2 + (rng() - 0.5) * s * 0.6)), yy]);
+        }
+      }
+      return pts;
+    }
+    if (mode === 'noise') {
+      /* 噪波密度：点密度随平滑噪声起伏（0.35~1.0），有疏有密，最像手工点彩 */
+      var nz = makeNoise(rng, 16);
+      var nn = Math.ceil(W / s), mm = Math.ceil(H / s);
+      for (j = 0; j < mm; j++) {
+        for (i = 0; i < nn; i++) {
+          var fx2 = (i + 0.2 + rng() * 0.6) * s, fy2 = (j + 0.2 + rng() * 0.6) * s;
+          if (fx2 >= W || fy2 >= H) continue;
+          if (rng() < 0.35 + 0.65 * nz(fx2 / W, fy2 / H)) pts.push([fx2, fy2]);
+        }
+      }
+      return pts;
+    }
+    if (mode === 'grid') {
+      /* 逐格随机：每格一点，格内随机抖动 */
+      var n5 = Math.ceil(W / s), m5 = Math.ceil(H / s);
+      for (j = 0; j < m5; j++) {
+        for (i = 0; i < n5; i++) {
+          pts.push([Math.min(W - 0.01, (i + 0.15 + rng() * 0.7) * s),
+                    Math.min(H - 0.01, (j + 0.15 + rng() * 0.7) * s)]);
+        }
+      }
+      return pts;
+    }
+    /* 完全随机散点（白噪声）：位置纯随机 */
+    var total = Math.floor(W * H / (s * s));
+    for (i = 0; i < total; i++) {
+      pts.push([rng() * (W - 0.01), rng() * (H - 0.01)]);
+    }
+    return pts;
+  }
+  /* __CORE_END__ */
+
+  function modeName(mode) {
+    var names = {
+      poisson: '泊松盘蓝噪声', r2: 'R2 低差异', gold: '黄金比例错行',
+      noise: '噪波密度', grid: '逐格随机', free: '完全随机'
+    };
+    return names[mode] || mode;
+  }
+
+  /* =================== 点彩渲染（WebGL GPU 主路径，Canvas2D 自动回退） =================== */
+  function paint() {
+    if (!hasImage) return;
+    var W = img.naturalWidth, H = img.naturalHeight;    // 原尺寸，不缩放
+    var s = +stepSel.value, mul = +sizeRange.value, mode = modeSel.value;
+    var paper = paperSel.value;
+
+    canvas.width = W; canvas.height = H;
+
+    var off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    var g = off.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, W, H);
+    var data = g.getImageData(0, 0, W, H).data;
+
+    /* 1. 生成点阵（CPU，纯数学） */
+    var t0 = performance.now();
+    var rng = mulberry32(seed);
+    var pts = genPoints(mode, W, H, s, rng);
+    var tGen = performance.now() - t0;
+
+    /* 2. 逐点取色（同坐标像素，与画布完全一致）+ 填 GPU 缓冲（SVG 到此为止，点击下载时才生成） */
+    var base = Math.max(0.4, s * 0.62 * mul);
+    var nat = jitSel.checked;
+    var n = pts.length;
+    var pos = new Float32Array(n * 2);
+    var sizes = new Float32Array(n);
+    var rads = new Float32Array(n);
+    var cols = new Uint8Array(n * 4);
+    var t1 = performance.now();
+    for (var i = 0; i < n; i++) {
+      var x = pts[i][0], y = pts[i][1];
+      var r = nat ? base * (0.72 + rng() * 0.56) : base;   // 自然点径：±28%
+      var c = sampleCoord(x, y, W, H);
+      var k = (c[1] * W + c[0]) * 4;
+      var a = Math.max(0.05, data[k + 3] / 255);
+      pos[i * 2] = x; pos[i * 2 + 1] = y;
+      sizes[i] = Math.max(1, Math.min(glMaxPointSize, r * 2));
+      rads[i] = r;
+      cols[i * 4] = data[k]; cols[i * 4 + 1] = data[k + 1];
+      cols[i * 4 + 2] = data[k + 2]; cols[i * 4 + 3] = Math.round(a * 255);
+    }
+    svgState = { pos: pos, rads: rads, cols: cols, W: W, H: H, paper: paper };
+    var tColor = performance.now() - t1;
+
+    /* 3. 绘制：一次 GPU 调用 vs 逐点 Canvas2D */
+    var t2 = performance.now();
+    if (gl) {
+      gl.viewport(0, 0, W, H);
+      gl.clearColor(parseInt(paper.slice(1, 3), 16) / 255,
+                    parseInt(paper.slice(3, 5), 16) / 255,
+                    parseInt(paper.slice(5, 7), 16) / 255, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.bindBuffer(gl.ARRAY_BUFFER, glBufPos);
+      gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(glAttrPos);
+      gl.vertexAttribPointer(glAttrPos, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, glBufSize);
+      gl.bufferData(gl.ARRAY_BUFFER, sizes, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(glAttrSize);
+      gl.vertexAttribPointer(glAttrSize, 1, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, glBufCol);
+      gl.bufferData(gl.ARRAY_BUFFER, cols, gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(glAttrCol);
+      gl.vertexAttribPointer(glAttrCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+      gl.uniform2f(glURes, W, H);
+      gl.drawArrays(gl.POINTS, 0, n);          // 全部色点，单次绘制
+    } else {
+      ctx.fillStyle = paper;
+      ctx.fillRect(0, 0, W, H);
+      for (var j = 0; j < n; j++) {
+        var cc = sampleCoord(pts[j][0], pts[j][1], W, H);
+        var kk = (cc[1] * W + cc[0]) * 4;
+        ctx.fillStyle = 'rgba(' + data[kk] + ',' + data[kk + 1] + ',' + data[kk + 2] + ',' +
+                        Math.max(0.05, data[kk + 3] / 255).toFixed(3) + ')';
+        ctx.beginPath();
+        ctx.arc(pts[j][0], pts[j][1], Math.max(0.4, sizes[j] / 2), 0, TAU);
+        ctx.fill();
+      }
+    }
+    var tDraw = performance.now() - t2;
+
+    statusEl.textContent = '「' + imgName + '」 ' + W + '×' + H + '（原尺寸） · ' + n +
+      ' 点 · ' + modeName(mode) + ' · 生成 ' + Math.round(tGen) + ' ms · 取色/缓冲 ' +
+      Math.round(tColor) + ' ms · 绘制 ' + Math.round(tDraw) + ' ms（' +
+      (gl ? 'WebGL GPU' : 'Canvas2D 回退') + '）· SVG 点击下载时生成';
+  }
+
+  function render() {
+    if (!hasImage) return;
+    var W = img.naturalWidth, H = img.naturalHeight;
+    var approx = Math.floor(W * H / (+stepSel.value * +stepSel.value));
+    statusEl.textContent = '正在生成「' + modeName(modeSel.value) + '」点阵：约 ' + approx + ' 点 …';
+    setTimeout(paint, 16);   // 先让状态文字上屏
+  }
+
+  /* =================== 载入图片 =================== */
+  function showFormatHint(f) {
+    var name = f && f.name ? '「' + f.name + '」' : '';
+    var ext = '';
+    if (f && f.name) { var m = /\.([^.]+)$/.exec(f.name); if (m) ext = m[1].toUpperCase(); }
+    var type = (f && f.type) || ext || '未知';
+    var size = f && f.size ? '（' + (f.size / 1048576).toFixed(1) + ' MB）' : '';
+    statusEl.textContent = '图片解码失败 ' + name + size + '，文件类型：' + type +
+      '。浏览器直接支持 JPG / PNG / WebP / GIF / AVIF / BMP / SVG；' +
+      'HEIC（iPhone 照片）/ TIFF / RAW 等需先转换 —— ' +
+      'macOS：「预览」打开 → 文件 → 导出 → 选 PNG 或 JPEG；' +
+      '或终端执行：sips -s format jpeg 照片.heic --out 照片.jpg';
+  }
+
+  function useImage(src, name, info) {
+    var im = new Image();
+    im.onload = function () {
+      if (!im.naturalWidth || !im.naturalHeight) {
+        statusEl.textContent = '这张图没有有效尺寸（SVG 需要自带 width/height 属性）';
+        return;
+      }
+      if (src.indexOf('blob:') === 0) URL.revokeObjectURL(src);
+      img = im;
+      imgName = (name || 'image').replace(/\.[^.]+$/, '');
+      hasImage = true;
+      drop.style.display = 'none';
+      canvas.style.display = 'block';
+      statusEl.textContent = '已载入「' + imgName + '」 ' + img.naturalWidth + '×' + img.naturalHeight + '，开始撒点…';
+      seed = (Math.random() * 1e9) | 0;
+      render();
+    };
+    im.onerror = function () {
+      if (src.indexOf('blob:') === 0) URL.revokeObjectURL(src);
+      showFormatHint(info || null);
+    };
+    im.src = src;
+  }
+
+  function loadFile(f) {
+    if (!f) return;
+    var url = URL.createObjectURL(f);
+    useImage(url, f.name, f);
+  }
+
+  document.getElementById('file').addEventListener('change', function (e) {
+    loadFile(e.target.files && e.target.files[0]);
+    e.target.value = '';
+  });
+
+  stage.addEventListener('dragover', function (e) { e.preventDefault(); });
+  stage.addEventListener('drop', function (e) {
+    e.preventDefault();
+    var f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f && (/^image\//.test(f.type) ||
+              /\.(jpe?g|png|webp|gif|avif|bmp|svg|heic|heif|tiff?|jfif)$/i.test(f.name || ''))) {
+      loadFile(f);
+    } else {
+      statusEl.textContent = f
+        ? '拖入的不是图片文件（' + (f.name || '未知') + '），支持 jpg / png / webp / gif / avif / bmp / svg'
+        : '没有检测到文件';
+    }
+  });
+
+  document.addEventListener('paste', function (e) {
+    var items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (var i = 0; i < items.length; i++) {
+      if (/^image\//.test(items[i].type)) {
+        loadFile(items[i].getAsFile());
+        break;
+      }
+    }
+  });
+
+  document.getElementById('btn-sample').addEventListener('click', function () {
+    if (typeof window.SRC_IMAGE === 'string' && window.SRC_IMAGE.length > 100) {
+      useImage(window.SRC_IMAGE, '示例图', null);
+    } else {
+      statusEl.textContent = '未找到内置示例图（image-data.js）';
+    }
+  });
+
+  /* =================== 控件 =================== */
+  document.getElementById('btn-regen').addEventListener('click', function () {
+    seed = (Math.random() * 1e9) | 0;
+    render();
+  });
+  modeSel.addEventListener('change', render);
+  stepSel.addEventListener('change', render);
+  paperSel.addEventListener('change', render);
+  jitSel.addEventListener('change', render);
+  sizeRange.addEventListener('input', paint);
+
+  /* =================== SVG 懒生成（点击下载时才构建，平时零开销） =================== */
+  function buildSvgText() {
+    var st = svgState;
+    var n = st.rads.length;
+    var parts = new Array(n + 2);
+    parts[0] = '<svg xmlns="http://www.w3.org/2000/svg" width="' + st.W + '" height="' + st.H +
+               '" viewBox="0 0 ' + st.W + ' ' + st.H + '">' +
+               '<rect width="100%" height="100%" fill="' + st.paper + '"/>';
+    for (var i = 0; i < n; i++) {
+      var a = st.cols[i * 4 + 3];
+      parts[i + 1] = '<circle cx="' + st.pos[i * 2].toFixed(2) + '" cy="' + st.pos[i * 2 + 1].toFixed(2) +
+        '" r="' + st.rads[i].toFixed(2) + '" fill="rgb(' + st.cols[i * 4] + ',' + st.cols[i * 4 + 1] +
+        ',' + st.cols[i * 4 + 2] + ')' +
+        (a >= 254 ? '' : ' fill-opacity="' + (a / 255).toFixed(3) + '"') + '"/>';
+    }
+    parts[n + 1] = '</svg>';
+    return parts.join('');
+  }
+
+  document.getElementById('btn-save-svg').addEventListener('click', function () {
+    if (!hasImage || !svgState) { statusEl.textContent = '还没有图片可以保存'; return; }
+    var t0 = performance.now();
+    var text = buildSvgText();                       // 此刻才逐点生成
+    var blob = new Blob([text], { type: 'image/svg+xml' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.download = imgName + '-pointillism-' + svgState.W + 'x' + svgState.H + '.svg';
+    a.href = url;
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
+    statusEl.textContent = 'SVG 已生成并开始下载：' + (text.length / 1048576).toFixed(1) +
+      ' MB · 用时 ' + Math.round(performance.now() - t0) + ' ms';
+  });
+
+  /* =================== PNG 导出（普通位图，不写 DPI 元数据） =================== */
+  document.getElementById('btn-save-png').addEventListener('click', function () {
+    if (!hasImage) { statusEl.textContent = '还没有图片可以保存'; return; }
+    var a = document.createElement('a');
+    a.download = imgName + '-pointillism-' + canvas.width + 'x' + canvas.height + '.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  });
+
+  /* 启动时：?img=xxx 直载同目录图片；否则展示内置示例图 */
+  (function () {
+    var m = /[?&]img=([^&]+)/.exec(location.search);
+    if (m) {
+      var p = decodeURIComponent(m[1]);
+      useImage(p, p.replace(/\.[^.]+$/, ''), null);
+      return;
+    }
+    if (typeof window.SRC_IMAGE === 'string' && window.SRC_IMAGE.length > 100) {
+      useImage(window.SRC_IMAGE, '示例图', null);
+    }
+  })();
+})();
+</script>
+</body>
+</html>
