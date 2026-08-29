@@ -252,8 +252,28 @@
     ];
   }
 
-  function genPoints(mode, W, H, s, rng) {
-    var pts = [], i, j, t;
+  /* 预计点数：一次性分配输出缓冲，避免反复扩容 */
+  function estCap(mode, W, H, s) {
+    if (mode === 'poisson') return Math.ceil(W * H / (s * s) * 1.05) + 64;
+    if (mode === 'gold')    return Math.ceil(H / s) * (Math.ceil(W / s) + 2);
+    if (mode === 'grid' || mode === 'noise')
+      return Math.ceil(W / s) * Math.ceil(H / s);
+    return Math.floor(W * H / (s * s));          // r2 / free
+  }
+
+  /* 生成点阵：直接写入紧凑 Float32Array（x0,y0,x1,y1,…），返回点数。
+     相比"每点一个 [x,y] 对象数组"，内存与 GC 压力小一个数量级 */
+  function genPoints(mode, W, H, s, rng, out) {
+    var m = 0, i, j, t;
+    function push(x, y) {
+      if (m * 2 + 1 >= out.length) {          // 动态扩容（泊松等模式兜底）
+        var big = new Float32Array(out.length * 2);
+        big.set(out);
+        out = big;
+      }
+      out[m * 2] = x; out[m * 2 + 1] = y;
+      m++;
+    }
     if (mode === 'poisson') {
       /* Bridson 泊松盘（蓝噪声）：点与点天然保持最小间距，无网格、无堆积、无空洞 */
       var r = s * 0.82, cell = r / Math.SQRT2;
@@ -261,13 +281,13 @@
       var grid = new Int32Array(gw * gh);
       for (i = 0; i < grid.length; i++) grid[i] = -1;
       var px = rng() * W, py = rng() * H;
-      pts.push([px, py]);
+      push(px, py);
       var active = [0];
       grid[Math.min(gh - 1, py / cell | 0) * gw + Math.min(gw - 1, px / cell | 0)] = 0;
       while (active.length) {
         var ai = rng() * active.length | 0;
         var pi = active[ai];
-        var bx = pts[pi][0], by = pts[pi][1];
+        var bx = out[pi * 2], by = out[pi * 2 + 1];
         var ok = false;
         for (t = 0; t < 24; t++) {
           var ang = rng() * TAU;
@@ -285,14 +305,14 @@
               if (gx3 < 0 || gx3 >= gw) continue;
               var idx = grid[row + gx3];
               if (idx < 0) continue;
-              var ddx = pts[idx][0] - nx, ddy = pts[idx][1] - ny;
+              var ddx = out[idx * 2] - nx, ddy = out[idx * 2 + 1] - ny;
               if (ddx * ddx + ddy * ddy < r * r) { fits = false; break; }
             }
           }
           if (fits) {
-            grid[gy2 * gw + gx2] = pts.length;
-            pts.push([nx, ny]);
-            active.push(pts.length - 1);
+            grid[gy2 * gw + gx2] = m;
+            push(nx, ny);
+            active.push(m - 1);
             ok = true;
             break;
           }
@@ -302,16 +322,16 @@
           active.pop();
         }
       }
-      return pts;
+      return m;
     }
     if (mode === 'r2') {
       /* R2 低差异序列：铺满时处处均匀，又没有可察觉的网格/条纹/聚堆 */
       var c1 = 0.7548776662466927, c2 = 0.5698402909980532;
       var count = Math.floor(W * H / (s * s));
       for (i = 0; i < count; i++) {
-        pts.push([((i * c1 + 0.5) % 1) * W, ((i * c2 + 0.5) % 1) * H]);
+        push(((i * c1 + 0.5) % 1) * W, ((i * c2 + 0.5) % 1) * H);
       }
-      return pts;
+      return m;
     }
     if (mode === 'gold') {
       /* 黄金比例错行：每行错开黄金比例相位，行内再加随机游走，天然而均匀 */
@@ -320,10 +340,10 @@
         var yy = Math.max(0, Math.min(H - 0.01, (j + 0.5) * s + (rng() - 0.5) * s * 0.5));
         var off = (j * 0.6180339887498949 % 1) * s;
         for (var xx = off - s; xx < W; xx += s) {
-          pts.push([Math.max(0, Math.min(W - 0.01, xx + s / 2 + (rng() - 0.5) * s * 0.6)), yy]);
+          push(Math.max(0, Math.min(W - 0.01, xx + s / 2 + (rng() - 0.5) * s * 0.6)), yy);
         }
       }
-      return pts;
+      return m;
     }
     if (mode === 'noise') {
       /* 噪波密度：点密度随平滑噪声起伏（0.35~1.0），有疏有密，最像手工点彩 */
@@ -333,28 +353,28 @@
         for (i = 0; i < nn; i++) {
           var fx2 = (i + 0.2 + rng() * 0.6) * s, fy2 = (j + 0.2 + rng() * 0.6) * s;
           if (fx2 >= W || fy2 >= H) continue;
-          if (rng() < 0.35 + 0.65 * nz(fx2 / W, fy2 / H)) pts.push([fx2, fy2]);
+          if (rng() < 0.35 + 0.65 * nz(fx2 / W, fy2 / H)) push(fx2, fy2);
         }
       }
-      return pts;
+      return m;
     }
     if (mode === 'grid') {
       /* 逐格随机：每格一点，格内随机抖动 */
       var n5 = Math.ceil(W / s), m5 = Math.ceil(H / s);
       for (j = 0; j < m5; j++) {
         for (i = 0; i < n5; i++) {
-          pts.push([Math.min(W - 0.01, (i + 0.15 + rng() * 0.7) * s),
-                    Math.min(H - 0.01, (j + 0.15 + rng() * 0.7) * s)]);
+          push(Math.min(W - 0.01, (i + 0.15 + rng() * 0.7) * s),
+               Math.min(H - 0.01, (j + 0.15 + rng() * 0.7) * s));
         }
       }
-      return pts;
+      return m;
     }
     /* 完全随机散点（白噪声）：位置纯随机 */
     var total = Math.floor(W * H / (s * s));
     for (i = 0; i < total; i++) {
-      pts.push([rng() * (W - 0.01), rng() * (H - 0.01)]);
+      push(rng() * (W - 0.01), rng() * (H - 0.01));
     }
-    return pts;
+    return m;
   }
   /* __CORE_END__ */
 
@@ -367,6 +387,10 @@
   }
 
   /* =================== 点彩渲染（WebGL GPU 主路径，Canvas2D 自动回退） =================== */
+  var pxCache = null;    // 图像像素缓存：同一张图不重复 drawImage + getImageData（大图省 100ms+）
+  var ptCache = null;    // 点阵/颜色缓存：参数不变复用 pos/cols，点径滑块拖拽只重算几十 ms
+  var glUploadKey = '';  // 已上传到 GPU 的点阵 key：pos/cols 未变时跳过两次 bufferData
+
   function paint() {
     if (!hasImage) return;
     var W = img.naturalWidth, H = img.naturalHeight;    // 原尺寸，不缩放
@@ -375,41 +399,53 @@
 
     canvas.width = W; canvas.height = H;
 
-    var off = document.createElement('canvas');
-    off.width = W; off.height = H;
-    var g = off.getContext('2d', { willReadFrequently: true });
-    g.drawImage(img, 0, 0, W, H);
-    var data = g.getImageData(0, 0, W, H).data;
+    /* 0. 图像像素缓存 */
+    if (!pxCache || pxCache.img !== img) {
+      var off = document.createElement('canvas');
+      off.width = W; off.height = H;
+      var g = off.getContext('2d', { willReadFrequently: true });
+      g.drawImage(img, 0, 0, W, H);
+      pxCache = { img: img, W: W, H: H, data: g.getImageData(0, 0, W, H).data };
+    }
+    var data = pxCache.data;
 
-    /* 1. 生成点阵（CPU，纯数学） */
-    var t0 = performance.now();
-    var rng = mulberry32(seed);
-    var pts = genPoints(mode, W, H, s, rng);
-    var tGen = performance.now() - t0;
+    /* 1. 点阵生成 + 逐点取色（缓存命中跳过；换图/点距/模式/种子变化才重算） */
+    var key = (imgName + '|' + seed + '|' + mode + '|' + s);
+    var pos, cols, n, fresh = 0;
+    if (ptCache && ptCache.img === img && ptCache.key === key) {
+      pos = ptCache.pos; cols = ptCache.cols; n = ptCache.n;
+    } else {
+      var tA = performance.now();
+      var cap = estCap(mode, W, H, s);
+      var tmp = new Float32Array(cap * 2);
+      var rng = mulberry32(seed);
+      n = genPoints(mode, W, H, s, rng, tmp);
+      pos = tmp.subarray(0, n * 2);
+      var tB = performance.now();
+      cols = new Uint8Array(n * 4);
+      for (var i = 0; i < n; i++) {
+        var c = sampleCoord(pos[i * 2], pos[i * 2 + 1], W, H);
+        var k = (c[1] * W + c[0]) * 4;
+        var aa = Math.max(0.05, data[k + 3] / 255);
+        cols[i * 4] = data[k]; cols[i * 4 + 1] = data[k + 1];
+        cols[i * 4 + 2] = data[k + 2]; cols[i * 4 + 3] = Math.round(aa * 255);
+      }
+      ptCache = { img: img, key: key, pos: pos, cols: cols, n: n };
+      fresh = performance.now() - tA;
+    }
 
-    /* 2. 逐点取色（同坐标像素，与画布完全一致）+ 填 GPU 缓冲（SVG 到此为止，点击下载时才生成） */
+    /* 2. 点径数组：只依赖 点径/抖动/种子，独立随机流（不干扰点阵序列），每次轻量重算 */
+    var radRng = mulberry32(((seed * 2654435761) ^ 0x9e3779b9) >>> 0);
     var base = Math.max(0.4, s * 0.62 * mul);
     var nat = jitSel.checked;
-    var n = pts.length;
-    var pos = new Float32Array(n * 2);
-    var sizes = new Float32Array(n);
     var rads = new Float32Array(n);
-    var cols = new Uint8Array(n * 4);
-    var t1 = performance.now();
-    for (var i = 0; i < n; i++) {
-      var x = pts[i][0], y = pts[i][1];
-      var r = nat ? base * (0.72 + rng() * 0.56) : base;   // 自然点径：±28%
-      var c = sampleCoord(x, y, W, H);
-      var k = (c[1] * W + c[0]) * 4;
-      var a = Math.max(0.05, data[k + 3] / 255);
-      pos[i * 2] = x; pos[i * 2 + 1] = y;
-      sizes[i] = Math.max(1, Math.min(glMaxPointSize, r * 2));
-      rads[i] = r;
-      cols[i * 4] = data[k]; cols[i * 4 + 1] = data[k + 1];
-      cols[i * 4 + 2] = data[k + 2]; cols[i * 4 + 3] = Math.round(a * 255);
+    var sizes = new Float32Array(n);
+    for (var i2 = 0; i2 < n; i2++) {
+      var r = nat ? base * (0.72 + radRng() * 0.56) : base;   // 自然点径：±28%
+      rads[i2] = r;
+      sizes[i2] = Math.max(1, Math.min(glMaxPointSize, r * 2));
     }
     svgState = { pos: pos, rads: rads, cols: cols, W: W, H: H, paper: paper };
-    var tColor = performance.now() - t1;
 
     /* 3. 绘制：一次 GPU 调用 vs 逐点 Canvas2D */
     var t2 = performance.now();
@@ -419,38 +455,41 @@
                     parseInt(paper.slice(3, 5), 16) / 255,
                     parseInt(paper.slice(5, 7), 16) / 255, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.bindBuffer(gl.ARRAY_BUFFER, glBufPos);
-      gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
-      gl.enableVertexAttribArray(glAttrPos);
-      gl.vertexAttribPointer(glAttrPos, 2, gl.FLOAT, false, 0, 0);
+      if (glUploadKey !== key) {                 // 坐标/颜色未变 → 跳过两笔大上传
+        glUploadKey = key;
+        gl.bindBuffer(gl.ARRAY_BUFFER, glBufPos);
+        gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(glAttrPos);
+        gl.vertexAttribPointer(glAttrPos, 2, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, glBufCol);
+        gl.bufferData(gl.ARRAY_BUFFER, cols, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(glAttrCol);
+        gl.vertexAttribPointer(glAttrCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+      }
       gl.bindBuffer(gl.ARRAY_BUFFER, glBufSize);
       gl.bufferData(gl.ARRAY_BUFFER, sizes, gl.STATIC_DRAW);
       gl.enableVertexAttribArray(glAttrSize);
       gl.vertexAttribPointer(glAttrSize, 1, gl.FLOAT, false, 0, 0);
-      gl.bindBuffer(gl.ARRAY_BUFFER, glBufCol);
-      gl.bufferData(gl.ARRAY_BUFFER, cols, gl.STATIC_DRAW);
-      gl.enableVertexAttribArray(glAttrCol);
-      gl.vertexAttribPointer(glAttrCol, 4, gl.UNSIGNED_BYTE, true, 0, 0);
       gl.uniform2f(glURes, W, H);
       gl.drawArrays(gl.POINTS, 0, n);          // 全部色点，单次绘制
     } else {
       ctx.fillStyle = paper;
       ctx.fillRect(0, 0, W, H);
       for (var j = 0; j < n; j++) {
-        var cc = sampleCoord(pts[j][0], pts[j][1], W, H);
-        var kk = (cc[1] * W + cc[0]) * 4;
-        ctx.fillStyle = 'rgba(' + data[kk] + ',' + data[kk + 1] + ',' + data[kk + 2] + ',' +
-                        Math.max(0.05, data[kk + 3] / 255).toFixed(3) + ')';
+        var o = j * 4;
+        var a4 = cols[o + 3] / 255;
+        ctx.fillStyle = 'rgba(' + cols[o] + ',' + cols[o + 1] + ',' + cols[o + 2] + ',' +
+                        (a4 >= 0.999 ? '1' : a4.toFixed(3)) + ')';
         ctx.beginPath();
-        ctx.arc(pts[j][0], pts[j][1], Math.max(0.4, sizes[j] / 2), 0, TAU);
+        ctx.arc(pos[j * 2], pos[j * 2 + 1], Math.max(0.4, sizes[j] / 2), 0, TAU);
         ctx.fill();
       }
     }
     var tDraw = performance.now() - t2;
 
     statusEl.textContent = '「' + imgName + '」 ' + W + '×' + H + '（原尺寸） · ' + n +
-      ' 点 · ' + modeName(mode) + ' · 生成 ' + Math.round(tGen) + ' ms · 取色/缓冲 ' +
-      Math.round(tColor) + ' ms · 绘制 ' + Math.round(tDraw) + ' ms（' +
+      ' 点 · ' + modeName(mode) + ' · 生成+取色 ' + (fresh ? Math.round(fresh) + ' ms' : '（缓存命中）') +
+      ' · 绘制 ' + Math.round(tDraw) + ' ms（' +
       (gl ? 'WebGL GPU' : 'Canvas2D 回退') + '）' +
       (n >= 2000000 ? '· 点量很大，大图建议 2px 以上' : '') +
       ' · SVG 点击下载时生成';
@@ -558,36 +597,41 @@
   sizeRange.addEventListener('input', paint);
 
   /* =================== SVG 懒生成（点击下载时才构建，平时零开销） =================== */
-  function buildSvgText() {
+  /* 返回分段数组 + 字节数：Blob 直接吃数组，避免 join 复制出第二份巨型字符串 */
+  function buildSvgParts() {
     var st = svgState;
     var n = st.rads.length;
     var parts = new Array(n + 2);
+    var bytes = 0;
     parts[0] = '<svg xmlns="http://www.w3.org/2000/svg" width="' + st.W + '" height="' + st.H +
                '" viewBox="0 0 ' + st.W + ' ' + st.H + '">' +
                '<rect width="100%" height="100%" fill="' + st.paper + '"/>';
+    bytes += parts[0].length;
     for (var i = 0; i < n; i++) {
       var a = st.cols[i * 4 + 3];
       parts[i + 1] = '<circle cx="' + st.pos[i * 2].toFixed(2) + '" cy="' + st.pos[i * 2 + 1].toFixed(2) +
         '" r="' + st.rads[i].toFixed(2) + '" fill="rgb(' + st.cols[i * 4] + ',' + st.cols[i * 4 + 1] +
         ',' + st.cols[i * 4 + 2] + ')' +
         (a >= 254 ? '' : ' fill-opacity="' + (a / 255).toFixed(3) + '"') + '"/>';
+      bytes += parts[i + 1].length;
     }
     parts[n + 1] = '</svg>';
-    return parts.join('');
+    bytes += parts[n + 1].length;
+    return { parts: parts, bytes: bytes };
   }
 
   document.getElementById('btn-save-svg').addEventListener('click', function () {
     if (!hasImage || !svgState) { statusEl.textContent = '还没有图片可以保存'; return; }
     var t0 = performance.now();
-    var text = buildSvgText();                       // 此刻才逐点生成
-    var blob = new Blob([text], { type: 'image/svg+xml' });
+    var out = buildSvgParts();                     // 此刻才逐点生成
+    var blob = new Blob(out.parts, { type: 'image/svg+xml' });
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.download = imgName + '-pointillism-' + svgState.W + 'x' + svgState.H + '.svg';
     a.href = url;
     a.click();
     setTimeout(function () { URL.revokeObjectURL(url); }, 3000);
-    statusEl.textContent = 'SVG 已生成并开始下载：' + (text.length / 1048576).toFixed(1) +
+    statusEl.textContent = 'SVG 已生成并开始下载：' + (out.bytes / 1048576).toFixed(1) +
       ' MB · 用时 ' + Math.round(performance.now() - t0) + ' ms';
   });
 
