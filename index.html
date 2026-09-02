@@ -101,6 +101,8 @@
   </label>
   <label class="ctl">点径 <input id="size" type="range" min="0.5" max="2.0" step="0.05" value="1.0" /></label>
   <label class="ctl"><input id="jitter" type="checkbox" checked /> 点径自然抖动</label>
+  <label class="ctl"><input id="weight" type="checkbox" /> 亮度加权（暗部点密）</label>
+  <label class="ctl">加权强度 <input id="wk" type="range" min="0.5" max="3.0" step="0.1" value="1.6" /></label>
   <label class="ctl">画布底色 <input type="color" id="paper" value="#f2eee4" /></label>
   <button id="btn-regen">&#127922; 重新撒点</button>
   <button id="btn-save-svg">&#11015; 下载 SVG</button>
@@ -108,7 +110,7 @@
 </div>
 
 <p id="status">请先选择一张图片，或点击「示例图」试试。</p>
-<p class="note">按上传图片原尺寸处理 · 下载 SVG（矢量，每个色点一个 circle 元素）或 PNG（位图，按像素原样导出）· 每个色点：自然随机位置 + 该位置的源图像真实色彩</p>
+<p class="note">按上传图片原尺寸处理 · 下载 SVG（矢量）或 PNG（位图）· 每个色点：自然随机位置 + 该位置的源图像真实色彩 · 亮度加权：暗部点密、亮部稀疏，远看明暗更还原</p>
 
 <script src="image-data.js"></script>
 <script>
@@ -125,6 +127,8 @@
   var stepSel = document.getElementById('step');
   var sizeRange = document.getElementById('size');
   var jitSel = document.getElementById('jitter');
+  var wSel = document.getElementById('weight');
+  var wRange = document.getElementById('wk');
   var paperSel = document.getElementById('paper');
 
   var seed = (Math.random() * 1e9) | 0;
@@ -409,8 +413,9 @@
     }
     var data = pxCache.data;
 
-    /* 1. 点阵生成 + 逐点取色（缓存命中跳过；换图/点距/模式/种子变化才重算） */
-    var key = (imgName + '|' + seed + '|' + mode + '|' + s);
+    /* 1. 点阵生成 + 逐点取色（缓存命中跳过；换图/点距/模式/种子/加权变化才重算） */
+    var wOn = wSel.checked, wK = +wRange.value;
+    var key = (imgName + '|' + seed + '|' + mode + '|' + s + '|' + wOn + '|' + wK);
     var pos, cols, n, fresh = 0;
     if (ptCache && ptCache.img === img && ptCache.key === key) {
       pos = ptCache.pos; cols = ptCache.cols; n = ptCache.n;
@@ -419,17 +424,29 @@
       var cap = estCap(mode, W, H, s);
       var tmp = new Float32Array(cap * 2);
       var rng = mulberry32(seed);
-      n = genPoints(mode, W, H, s, rng, tmp);
-      pos = tmp.subarray(0, n * 2);
+      var n0 = genPoints(mode, W, H, s, rng, tmp);
       var tB = performance.now();
-      cols = new Uint8Array(n * 4);
-      for (var i = 0; i < n; i++) {
-        var c = sampleCoord(pos[i * 2], pos[i * 2 + 1], W, H);
+      var cols0 = new Uint8Array(n0 * 4);
+      var m = 0;
+      for (var i = 0; i < n0; i++) {
+        var x0 = tmp[i * 2], y0 = tmp[i * 2 + 1];
+        var c = sampleCoord(x0, y0, W, H);
         var k = (c[1] * W + c[0]) * 4;
+        var cr = data[k], cg = data[k + 1], cb = data[k + 2];
         var aa = Math.max(0.05, data[k + 3] / 255);
-        cols[i * 4] = data[k]; cols[i * 4 + 1] = data[k + 1];
-        cols[i * 4 + 2] = data[k + 2]; cols[i * 4 + 3] = Math.round(aa * 255);
+        if (wOn) {
+          /* 亮度加权（Secord 思路）：暗部保留率高、亮部稀疏 → 明暗层次更还原 */
+          var L = (0.2126 * cr + 0.7152 * cg + 0.0722 * cb) / 255;
+          if (rng() >= Math.min(1, wK * (1 - L))) continue;
+        }
+        tmp[m * 2] = x0; tmp[m * 2 + 1] = y0;        // 原地压实（m ≤ i，安全）
+        cols0[m * 4] = cr; cols0[m * 4 + 1] = cg;
+        cols0[m * 4 + 2] = cb; cols0[m * 4 + 3] = Math.round(aa * 255);
+        m++;
       }
+      n = m;
+      pos = tmp.subarray(0, n * 2);
+      cols = cols0.subarray(0, n * 4);
       ptCache = { img: img, key: key, pos: pos, cols: cols, n: n };
       fresh = performance.now() - tA;
     }
@@ -595,6 +612,16 @@
   paperSel.addEventListener('change', render);
   jitSel.addEventListener('change', render);
   sizeRange.addEventListener('input', paint);
+  wSel.addEventListener('change', function () {
+    wRange.disabled = !wSel.checked;     // 未开启加权时禁用强度滑杆
+    render();
+  });
+  var wkTimer = null;
+  wRange.addEventListener('input', function () {   // 拖动防抖，避免高频重建
+    clearTimeout(wkTimer);
+    wkTimer = setTimeout(render, 120);
+  });
+  wRange.disabled = true;
 
   /* =================== SVG 懒生成（点击下载时才构建，平时零开销） =================== */
   /* 返回分段数组 + 字节数：Blob 直接吃数组，避免 join 复制出第二份巨型字符串 */
