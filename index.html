@@ -3,114 +3,97 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>点彩画派 · 通用图片点彩工具</title>
+<title>点彩 · Pointillism</title>
 <style>
+  :root { --fg:#111; --bg:#fff; --line:#e4e4e4; --muted:#8b8b8b; --hover:#f4f4f4; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e9e9e9; --bg:#131313; --line:#2f2f2f; --hover:#212121; }
+  }
   * { box-sizing: border-box; }
   body {
-    margin: 0; min-height: 100vh;
-    background: radial-gradient(1100px 700px at 50% 18%, #221a14 0%, #0b0908 62%);
-    display: flex; flex-direction: column; align-items: center;
-    padding: 28px 14px 48px;
-    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-    color: #ece2d4;
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--fg);
+    font: 13px/1.6 -apple-system, "SF Pro Text", "Helvetica Neue", "PingFang SC", Arial, sans-serif;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    padding: 14px 14px 18px;
   }
-  h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: .14em; }
-  .sub { margin: 8px 0 20px; font-size: 13px; color: #b5a693; letter-spacing: .05em; }
+  .bar {
+    width: 100%; max-width: 1120px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+    padding-bottom: 10px; border-bottom: 1px solid var(--line);
+  }
+  .brand { font-weight: 600; }
+  .brand em { font-style: normal; font-weight: 400; color: var(--muted); margin-left: 6px; }
+  button, .file, select {
+    font: inherit; color: var(--fg); background: transparent;
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px;
+  }
+  button, .file { cursor: pointer; }
+  button:hover, .file:hover { background: var(--hover); }
+  select { padding: 3px 6px; }
+  .ctl, .chk { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
+  input[type=range] { width: 92px; accent-color: var(--fg); }
+  input[type=checkbox] { accent-color: var(--fg); }
+  input[type=color] { width: 26px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: transparent; cursor: pointer; }
+  input[type=file] { display: none; }
   .stage {
-    position: relative; width: min(92vw, 820px);
-    border-radius: 10px; background: #0b0908;
-    box-shadow: 0 30px 90px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.09);
-    display: flex; align-items: center; justify-content: center;
-    padding: 10px 0; min-height: 200px;
+    flex: 1; width: 100%; max-width: 1120px;
+    display: flex; align-items: center; justify-content: center; min-height: 280px;
   }
   canvas {
-    display: none;
-    max-width: calc(100% - 4px); max-height: 640px;
-    width: auto; height: auto;          /* 保持宽高比，适合容器显示 */
-    border-radius: 4px;
+    display: none; width: auto; height: auto;
+    max-width: 100%; max-height: 76vh;
+    border: 1px solid var(--line); border-radius: 3px;
   }
-  .drop-hint {
-    padding: 56px 24px; text-align: center; color: #9c8f7a;
-    font-size: 14px; line-height: 2; letter-spacing: .08em; cursor: pointer;
+  .drop {
+    width: 100%; padding: 84px 0; text-align: center; color: var(--muted);
+    border: 1px dashed var(--line); border-radius: 8px; cursor: pointer;
   }
-  .drop-hint b { color: #cdbfa9; font-weight: 600; }
-  .drop-hint .big { font-size: 40px; display: block; margin-bottom: 8px; }
-  .controls {
-    margin-top: 22px; display: flex; flex-wrap: wrap; gap: 14px;
-    align-items: center; justify-content: center; max-width: 900px;
-  }
-  .controls button, .file-btn {
-    background: linear-gradient(#4a3524, #33231a);
-    color: #f2e7d5; border: 1px solid #7a5734; padding: 10px 20px; border-radius: 9px;
-    font-size: 14px; letter-spacing: .12em; cursor: pointer; display: inline-block;
-    transition: transform .12s, filter .12s;
-  }
-  .controls button:hover, .file-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
-  input[type=file] { display: none; }
-  .ctl { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #cdbfa9; }
-  select { accent-color: #c7762e; }
-  select, input[type=color] {
-    background: #2b2018; color: #f2e7d5; border: 1px solid #7a5734;
-    border-radius: 7px; padding: 6px 8px; font-size: 13px;
-  }
-  input[type=color] { width: 44px; padding: 2px; cursor: pointer; }
-  input[type=range] { width: 120px; accent-color: #c7762e; }
-  input[type=checkbox] { accent-color: #c7762e; }
-  #status { margin-top: 14px; font-size: 12px; color: #cdbfa9; letter-spacing: .06em; min-height: 1.2em; }
-  .note { margin-top: 4px; font-size: 12px; color: #8d806c; letter-spacing: .06em; text-align: center; }
+  #status { width: 100%; max-width: 1120px; margin: 0; color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
-<h1>点 彩 画 派 · 通 用 图 片 点 彩 工 具</h1>
-<p class="sub">自然散布函数落点 · 逐点取色 —— 任何图片，都可以用色点重新画一遍</p>
-
-<div class="stage" id="stage">
-  <canvas id="art"></canvas>
-  <div class="drop-hint" id="drop">
-    <span class="big">&#128444;&#65039;</span>
-    <b>点击选择图片</b> · 或把图片<b>拖拽到此处</b> · 或 <b>Ctrl+V 粘贴</b><br />
-    支持 JPG / PNG / WebP / GIF / AVIF / BMP / SVG<br />
-    （HEIC / TIFF 等浏览器不认的格式需先转换，失败时会提示方法）
-  </div>
-</div>
-
-<div class="controls">
-  <label class="file-btn" for="file">&#128194; 选择图片</label>
+<div class="bar">
+  <span class="brand">点彩<em>pointillism</em></span>
+  <label class="file" for="file">选择图片</label>
   <input type="file" id="file" accept="image/*" />
-  <button id="btn-sample" title="加载内置示例图">&#127916; 示例图</button>
-  <label class="ctl">散布方式
+  <button id="btn-sample">示例</button>
+  <label class="ctl">散布
     <select id="mode">
-      <option value="poisson" selected>泊松盘 · 蓝噪声</option>
-      <option value="r2">R2 低差异序列</option>
+      <option value="poisson" selected>泊松盘（蓝噪声）</option>
+      <option value="r2">R2 低差异</option>
       <option value="gold">黄金比例错行</option>
-      <option value="noise">噪波密度（手工感）</option>
+      <option value="noise">噪波密度</option>
       <option value="grid">逐格随机</option>
-      <option value="free">完全随机散点</option>
+      <option value="free">完全随机</option>
     </select>
   </label>
-  <label class="ctl">平均点距
+  <label class="ctl">点距
     <select id="step">
-      <option value="1">1px（逐像素）</option>
-      <option value="2">2px（最密）</option>
+      <option value="1">1px</option>
+      <option value="2">2px</option>
       <option value="3" selected>3px</option>
       <option value="4">4px</option>
       <option value="5">5px</option>
       <option value="6">6px</option>
-      <option value="8">8px（疏）</option>
+      <option value="8">8px</option>
     </select>
   </label>
   <label class="ctl">点径 <input id="size" type="range" min="0.5" max="2.0" step="0.05" value="1.0" /></label>
-  <label class="ctl"><input id="jitter" type="checkbox" checked /> 点径自然抖动</label>
-  <label class="ctl"><input id="weight" type="checkbox" /> 亮度加权（暗部点密）</label>
-  <label class="ctl">加权强度 <input id="wk" type="range" min="0.5" max="3.0" step="0.1" value="1.6" /></label>
-  <label class="ctl">画布底色 <input type="color" id="paper" value="#f2eee4" /></label>
-  <button id="btn-regen">&#127922; 重新撒点</button>
-  <button id="btn-save-svg">&#11015; 下载 SVG</button>
-  <button id="btn-save-png">&#11015; 下载 PNG</button>
+  <label class="chk"><input id="jitter" type="checkbox" checked />抖动</label>
+  <label class="chk"><input id="weight" type="checkbox" />暗部加权</label>
+  <label class="ctl">强度 <input id="wk" type="range" min="0.5" max="3.0" step="0.1" value="1.6" /></label>
+  <input type="color" id="paper" value="#f2eee4" title="画布底色" />
+  <button id="btn-regen">重新撒点</button>
+  <button id="btn-save-svg">SVG</button>
+  <button id="btn-save-png">PNG</button>
 </div>
 
-<p id="status">请先选择一张图片，或点击「示例图」试试。</p>
-<p class="note">按上传图片原尺寸处理 · 下载 SVG（矢量）或 PNG（位图）· 每个色点：自然随机位置 + 该位置的源图像真实色彩 · 亮度加权：暗部点密、亮部稀疏，远看明暗更还原</p>
+<div class="stage" id="stage">
+  <canvas id="art"></canvas>
+  <div class="drop" id="drop">拖入图片 · 点击选择 · 粘贴<br />jpg png webp gif avif bmp svg</div>
+</div>
+
+<p id="status">拖入任意图片开始。</p>
 
 <script src="image-data.js"></script>
 <script>
@@ -567,6 +550,10 @@
   document.getElementById('file').addEventListener('change', function (e) {
     loadFile(e.target.files && e.target.files[0]);
     e.target.value = '';
+  });
+
+  drop.addEventListener('click', function () {       // 空白区点击也能选图
+    document.getElementById('file').click();
   });
 
   stage.addEventListener('dragover', function (e) { e.preventDefault(); });
