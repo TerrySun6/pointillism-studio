@@ -1,5 +1,4 @@
 .DS_Store
-# 开发过程中的源图与旧版 demo（不随仓库发布）
+# 开发过程中的源图与测试图（不随仓库发布）
 kid-a-album-cover*.webp
 test-portrait.png
-pointillism-mountain.html
